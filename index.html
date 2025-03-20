@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DGB-Arb</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 1rem;
+            background-color: #f3f4f6;
+        }
+        .card {
+            @apply bg-white rounded-lg shadow p-4 mb-4;
+        }
+        .button {
+            @apply bg-blue-500 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-600;
+        }
+        .opportunity {
+            @apply border border-gray-300 rounded p-3;
+        }
+    </style>
+</head>
+<body>
+    <div class="max-w-4xl mx-auto">
+        <div class="card sticky top-0 bg-gray-100">
+            <div class="flex justify-between items-center">
+                <h1 class="text-xl font-bold">DGB-Arb</h1>
+                <button id="refreshButton" class="button">Refresh</button>
+            </div>
+            <p class="text-xs text-gray-600 mt-2">
+                Last Updated: <span id="lastUpdated">Never</span>
+            </p>
+        </div>
+        <div id="opportunities" class="card">
+            <h2 class="text-lg font-bold mb-2">Opportunities</h2>
+            <p class="text-gray-500">Loading...</p>
+        </div>
+    </div>
+
+    <script>
+        const API_CONFIGS = [
+            {
+                name: 'The Odds API',
+                sportsUrl: 'https://api.the-odds-api.com/v4/sports',
+                oddsBaseUrl: 'https://api.the-odds-api.com/v4/sports',
+                key: '4a0183ff75bc6a57c88422076c0f350b',
+            },
+            {
+                name: 'API2',
+                sportsUrl: 'https://api.example.com/sports',
+                oddsBaseUrl: 'https://api.example.com/odds',
+                key: 'API_KEY_2',
+            },
+        ];
+
+        let opportunities = [];
+
+        async function fetchSports(api) {
+            try {
+                const response = await fetch(`${api.sportsUrl}?apiKey=${api.key}`);
+                if (!response.ok) throw new Error(`${api.name} sports fetch failed: ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error(error);
+                return [];
+            }
+        }
+
+        async function fetchOdds(api, sportKey) {
+            try {
+                const response = await fetch(
+                    `${api.oddsBaseUrl}/${sportKey}/odds?apiKey=${api.key}®ions=us&markets=h2h`
+                );
+                if (!response.ok) throw new Error(`${api.name} odds fetch failed: ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error(error);
+                return [];
+            }
+        }
+
+        async function fetchAllData() {
+            try {
+                opportunities = [];
+                for (const api of API_CONFIGS) {
+                    const sports = await fetchSports(api);
+                    for (const sport of sports) {
+                        const sportKey = sport.key || sport.id || sport.slug;
+                        if (!sportKey) continue;
+                        const odds = await fetchOdds(api, sportKey);
+                        if (odds && Array.isArray(odds)) {
+                            odds.forEach(event => {
+                                event.sport = sport.title || sport.name || 'Unknown';
+                                event.api = api.name;
+                                opportunities.push(event);
+                            });
+                        }
+                    }
+                }
+                findArbitrageOpportunities();
+                displayOpportunities();
+            } catch (error) {
+                document.getElementById('opportunities').innerHTML = `
+                    <p class="text-red-500">Error: ${error.message}</p>
+                `;
+            }
+            document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+        }
+
+        function findArbitrageOpportunities() {
+            opportunities = opportunities.map(event => {
+                const bookmakers = event.bookmakers || [];
+                if (bookmakers.length < 2) return null;
+
+                const bestOdds = {
+                    home: { odds: 0, bookmaker: '' },
+                    away: { odds: 0, bookmaker: '' },
+                };
+
+                bookmakers.forEach(bookmaker => {
+                    const market = bookmaker.markets.find(m => m.key === 'h2h');
+                    if (!market) return;
+
+                    const homeOdds = market.outcomes.find(o => o.name === event.home_team)?.price;
+                    const awayOdds = market.outcomes.find(o => o.name === event.away_team)?.price;
+
+                    if (homeOdds && homeOdds > bestOdds.home.odds) {
+                        bestOdds.home = { odds: homeOdds, bookmaker: bookmaker.title };
+                    }
+                    if (awayOdds && awayOdds > bestOdds.away.odds) {
+                        bestOdds.away = { odds: awayOdds, bookmaker: bookmaker.title };
+                    }
+                });
+
+                const impliedProbHome = 1 / bestOdds.home.odds;
+                const impliedProbAway = 1 / bestOdds.away.odds;
+                const totalImpliedProb = impliedProbHome + impliedProbAway;
+
+                if (totalImpliedProb < 1) {
+                    const returnPercentage = ((1 / totalImpliedProb) - 1) * 100;
+                    const maxStake = 100;
+                    const homeStake = Math.round(maxStake * impliedProbHome / totalImpliedProb);
+                    const awayStake = Math.round(maxStake * impliedProbAway / totalImpliedProb);
+
+                    return {
+                        id: `${event.id}-${event.api}`,
+                        homeTeam: event.home_team,
+                        awayTeam: event.away_team,
+                        sport: event.sport,
+                        return: returnPercentage,
+                        bets: [
+                            { team: event.home_team, odds: bestOdds.home.odds, bookmaker: bestOdds.home.bookmaker, stake: homeStake },
+                            { team: event.away_team, odds: bestOdds.away.odds, bookmaker: bestOdds.away.bookmaker, stake: awayStake },
+                        ],
+                    };
+                }
+                return null;
+            }).filter(opp => opp !== null);
+        }
+
+        function convertToAmerican(decimal) {
+            return decimal >= 2 ? Math.round((decimal - 1) * 100) : Math.round(-100 / (decimal - 1));
+        }
+
+        function displayOpportunities() {
+            const container = document.getElementById('opportunities');
+            if (opportunities.length === 0) {
+                container.innerHTML = '<p class="text-gray-500">No opportunities found.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <h2 class="text-lg font-bold mb-2">Opportunities</h2>
+                <div class="grid grid-cols-1 gap-4">
+                    ${opportunities.map(opp => `
+                        <div class="opportunity">
+                            <div class="flex justify-between">
+                                <div>
+                                    <h3 class="font-bold text-sm">${opp.homeTeam} vs ${opp.awayTeam}</h3>
+                                    <p class="text-xs text-gray-600">${opp.sport}</p>
+                                </div>
+                                <p class="font-bold text-green-500 text-sm">${opp.return.toFixed(2)}%</p>
+                            </div>
+                            <div class="mt-2 space-y-2">
+                                ${opp.bets.map(bet => `
+                                    <div class="flex justify-between text-sm">
+                                        <div>
+                                            <p>${bet.team}</p>
+                                            <p class="text-xs text-gray-500">${bet.bookmaker}</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <p>$${bet.stake}</p>
+                                            <p class="text-xs text-gray-500">${convertToAmerican(bet.odds)}</p>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        document.getElementById('refreshButton').addEventListener('click', fetchAllData);
+        fetchAllData();
+    </script>
+</body>
+</html>
