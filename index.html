@@ -51,9 +51,7 @@
             },
             {
                 name: 'Sportsbook API',
-                sportsUrl: 'https://sportsbook-api2.p.rapidapi.com/v1/sports',
-                oddsBaseUrl: 'https://sportsbook-api2.p.rapidapi.com/v1/sports/',
-                key: '0c0404f737mshc8deeeb00fa4d74p160cf0jsnd8c7aaea1796',
+                advantagesUrl: 'https://sportsbook-api2.p.rapidapi.com/v0/advantages/?type=ARBITRAGE',
                 headers: {
                     'X-Rapidapi-Host': 'sportsbook-api2.p.rapidapi.com',
                     'X-Rapidapi-Key': '0c0404f737mshc8deeeb00fa4d74p160cf0jsnd8c7aaea1796',
@@ -65,14 +63,13 @@
 
         async function fetchSports(api) {
             try {
-                const url = api.name === 'The Odds API' 
-                    ? `${api.sportsUrl}?apiKey=${api.key}` 
-                    : api.sportsUrl;
-                const response = await fetch(url, {
+                const response = await fetch(`${api.sportsUrl}?apiKey=${api.key}`, {
                     headers: api.headers,
                 });
                 if (!response.ok) throw new Error(`${api.name} sports fetch failed: ${response.status}`);
-                return await response.json();
+                const data = await response.json();
+                console.log(`${api.name} sports response:`, data);
+                return data;
             } catch (error) {
                 console.error(error);
                 return [];
@@ -81,14 +78,29 @@
 
         async function fetchOdds(api, sportKey) {
             try {
-                const url = api.name === 'The Odds API'
-                    ? `${api.oddsBaseUrl}${sportKey}/odds?apiKey=${api.key}®ions=us&markets=h2h`
-                    : `${api.oddsBaseUrl}${sportKey}/odds`;
-                const response = await fetch(url, {
+                const response = await fetch(
+                    `${api.oddsBaseUrl}${sportKey}/odds?apiKey=${api.key}®ions=us&markets=h2h`,
+                    { headers: api.headers }
+                );
+                if (!response.ok) throw new Error(`${api.name} odds fetch failed: ${response.status}`);
+                const data = await response.json();
+                console.log(`${api.name} odds response for ${sportKey}:`, data);
+                return data;
+            } catch (error) {
+                console.error(error);
+                return [];
+            }
+        }
+
+        async function fetchAdvantages(api) {
+            try {
+                const response = await fetch(api.advantagesUrl, {
                     headers: api.headers,
                 });
-                if (!response.ok) throw new Error(`${api.name} odds fetch failed: ${response.status}`);
-                return await response.json();
+                if (!response.ok) throw new Error(`${api.name} advantages fetch failed: ${response.status}`);
+                const data = await response.json();
+                console.log(`${api.name} advantages response:`, data);
+                return data;
             } catch (error) {
                 console.error(error);
                 return [];
@@ -99,14 +111,24 @@
             try {
                 opportunities = [];
                 for (const api of API_CONFIGS) {
-                    const sports = await fetchSports(api);
-                    for (const sport of sports) {
-                        const sportKey = sport.key || sport.id || sport.slug;
-                        if (!sportKey) continue;
-                        const odds = await fetchOdds(api, sportKey);
-                        if (odds && Array.isArray(odds)) {
-                            odds.forEach(event => {
-                                event.sport = sport.title || sport.name || 'Unknown';
+                    if (api.name === 'The Odds API') {
+                        const sports = await fetchSports(api);
+                        for (const sport of sports) {
+                            const sportKey = sport.key || sport.id || sport.slug;
+                            if (!sportKey) continue;
+                            const odds = await fetchOdds(api, sportKey);
+                            if (odds && Array.isArray(odds)) {
+                                odds.forEach(event => {
+                                    event.sport = sport.title || sport.name || 'Unknown';
+                                    event.api = api.name;
+                                    opportunities.push(event);
+                                });
+                            }
+                        }
+                    } else if (api.name === 'Sportsbook API') {
+                        const advantages = await fetchAdvantages(api);
+                        if (advantages && Array.isArray(advantages)) {
+                            advantages.forEach(event => {
                                 event.api = api.name;
                                 opportunities.push(event);
                             });
@@ -162,7 +184,7 @@
                         id: `${event.id}-${event.api}`,
                         homeTeam: event.home_team,
                         awayTeam: event.away_team,
-                        sport: event.sport,
+                        sport: event.sport || 'Unknown',
                         return: returnPercentage,
                         bets: [
                             { team: event.home_team, odds: bestOdds.home.odds, bookmaker: bestOdds.home.bookmaker, stake: homeStake },
