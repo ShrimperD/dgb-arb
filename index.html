@@ -44,15 +44,20 @@
         const API_CONFIGS = [
             {
                 name: 'The Odds API',
-                sportsUrl: 'https://api.the-odds-api.com/v4/sports',
-                oddsBaseUrl: 'https://api.the-odds-api.com/v4/sports',
+                sportsUrl: 'https://api.the-odds-api.com/v4/sports/',
+                oddsBaseUrl: 'https://api.the-odds-api.com/v4/sports/',
                 key: '4a0183ff75bc6a57c88422076c0f350b',
+                headers: {},
             },
             {
-                name: 'API2',
-                sportsUrl: 'https://api.example.com/sports',
-                oddsBaseUrl: 'https://api.example.com/odds',
-                key: 'API_KEY_2',
+                name: 'Sportsbook API',
+                sportsUrl: 'https://sportsbook-api2.p.rapidapi.com/v1/sports',
+                oddsBaseUrl: 'https://sportsbook-api2.p.rapidapi.com/v1/sports/',
+                key: '0c0404f737mshc8deeeb00fa4d74p160cf0jsnd8c7aaea1796',
+                headers: {
+                    'X-Rapidapi-Host': 'sportsbook-api2.p.rapidapi.com',
+                    'X-Rapidapi-Key': '0c0404f737mshc8deeeb00fa4d74p160cf0jsnd8c7aaea1796',
+                },
             },
         ];
 
@@ -60,7 +65,12 @@
 
         async function fetchSports(api) {
             try {
-                const response = await fetch(`${api.sportsUrl}?apiKey=${api.key}`);
+                const url = api.name === 'The Odds API' 
+                    ? `${api.sportsUrl}?apiKey=${api.key}` 
+                    : api.sportsUrl;
+                const response = await fetch(url, {
+                    headers: api.headers,
+                });
                 if (!response.ok) throw new Error(`${api.name} sports fetch failed: ${response.status}`);
                 return await response.json();
             } catch (error) {
@@ -71,9 +81,12 @@
 
         async function fetchOdds(api, sportKey) {
             try {
-                const response = await fetch(
-                    `${api.oddsBaseUrl}/${sportKey}/odds?apiKey=${api.key}®ions=us&markets=h2h`
-                );
+                const url = api.name === 'The Odds API'
+                    ? `${api.oddsBaseUrl}${sportKey}/odds?apiKey=${api.key}®ions=us&markets=h2h`
+                    : `${api.oddsBaseUrl}${sportKey}/odds`;
+                const response = await fetch(url, {
+                    headers: api.headers,
+                });
                 if (!response.ok) throw new Error(`${api.name} odds fetch failed: ${response.status}`);
                 return await response.json();
             } catch (error) {
